@@ -13,6 +13,7 @@
 require 'cgi'
 require 'fileutils'
 require 'securerandom'
+require 'shellwords'
 require_relative '../../paths'
 
 module SonicPi
@@ -32,6 +33,36 @@ module SonicPi
     else
       raise "Unsupported platform #{RUBY_PLATFORM}"
     end
+
+    DEFAULT_OPTS = {
+      "-a" => "1024",
+      "-m" => "131072",
+      "-D" => "0",
+      "-R" => "0",
+      "-l" => "1",
+      "-i" => "16",
+      "-o" => "16",
+      "-b" => "4096",
+      "-B" => "127.0.0.1" }.freeze
+
+    OS_SPECIFIC_OPTS =
+      case self.os
+      when :raspberry
+        {
+        "-c" => "128",
+        "-z" => "128",
+        "-i" => "2",
+        "-o" => "2",
+        "-U" => Paths.scsynth_raspberry_plugin_path
+      }.freeze
+      when :windows
+        {
+        "-U" => Paths.scsynth_windows_plugin_path
+      }.freeze
+      else
+        {
+      }.freeze
+      end
 
     @@safe_mode = false
     @@current_uuid = nil
@@ -413,8 +444,6 @@ module SonicPi
       return params, opts
     end
 
-
-
     def merge_synth_arg_maps_array(opts_a)
       return opts_a if opts_a.is_a? Hash
 
@@ -508,6 +537,74 @@ module SonicPi
           __system_thread_locals(t).set_local(:sonic_pi_local_spider_in_no_kill_block, false)
         end
         r
+      end
+    end
+
+    def merge_scsynth_opts(opts)
+      # extract scsynth opts override
+      begin
+        clobber_opts_a = Shellwords.split(opts.fetch(:scsynth_opts_override, ""))
+        scsynth_opts_override = clobber_opts_a.each_slice(2).to_h
+      rescue
+        scsynth_opts_override = {}
+      end
+
+      # extract scsynth opts
+      begin
+        scsynth_opts_a = Shellwords.split(opts.fetch(:scsynth_opts, ""))
+        scsynth_opts = clobber_opts_a.each_slice(2).to_h
+      rescue
+        scsynth_opts = {}
+      end
+
+
+      if scsynth_opts_override.empty?
+        return {"-u" => @port}.merge(DEFAULT_OPTS).merge(OS_SPECIFIC_OPTS).merge(opts).merge(scsynth_opts)
+      else
+        return scsynth_opts_override
+      end
+    end
+
+    def open_log
+      begin
+        @@log_file = File.open(Paths.daemon_log_path, 'a')
+      rescue StandardError => e
+        STDERR.puts "Unable to open log file #{Paths.daemon_log_path}"
+        STDERR.puts e.inspect
+        @@log_file = nil
+      end
+    end
+
+    def self.close_log
+      @@log_file.close if @@log_file
+    end
+
+    def self.log(msg)
+      begin
+        if @@log_file
+          @@log_file.puts("[#{Time.now.strftime("%Y-%m-%d %H:%M:%S")}] #{msg}")
+          @@log_file.flush
+        end
+      rescue IOError => e
+        STDERR.puts "Error. Unable to write to log file: #{e.message}"
+        STDERR.puts e.inspect
+      end
+    end
+
+    def self.os
+      case RUBY_PLATFORM
+      when /.*arm.*-linux.*/
+        :raspberry
+      when /aarch64.*linux.*/
+        :raspberry
+      when /.*linux.*/
+        :linux
+      when /.*darwin.*/
+        :macos
+      when /.*mingw.*/
+        :windows
+      else
+        raise "Unsupported platform #{RUBY_PLATFORM}"
       end
     end
   end

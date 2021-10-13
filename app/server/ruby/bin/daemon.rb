@@ -13,13 +13,13 @@
 #++
 
 require 'socket'
-require 'shellwords'
 require 'open3'
 require 'fileutils'
 require 'time'
 
 require_relative "../lib/sonicpi/osc/osc"
 require_relative "../lib/sonicpi/promise"
+require_relative "../lib/sonicpi/util"
 
 # Make sure vendored tomlrb lib is on the Ruby path so it can be required
 Dir["#{File.expand_path("../../vendor", __FILE__)}/*/lib/"].each do |vendor_lib|
@@ -691,36 +691,7 @@ module SonicPi
 
 
     class ScsynthBooter < ProcessBooter
-
-      DEFAULT_OPTS = {
-        "-a" => "1024",
-        "-m" => "131072",
-        "-D" => "0",
-        "-R" => "0",
-        "-l" => "1",
-        "-i" => "16",
-        "-o" => "16",
-        "-b" => "4096",
-        "-B" => "127.0.0.1" }.freeze
-
-      OS_SPECIFIC_OPTS =
-        case Util.os
-        when :raspberry
-          {
-          "-c" => "128",
-          "-z" => "128",
-          "-i" => "2",
-          "-o" => "2",
-          "-U" => Paths.scsynth_raspberry_plugin_path
-        }.freeze
-        when :windows
-          {
-          "-U" => Paths.scsynth_windows_plugin_path
-        }.freeze
-        else
-          {
-        }.freeze
-        end
+      include SonicPi::Util
 
       OPTS_TOML_KEY_CONVERSION = {
         sound_card_name:          "-H",
@@ -751,7 +722,7 @@ module SonicPi
         end
 
         opts = unify_toml_opts_hash(toml_opts_hash)
-        opts = merge_opts(opts)
+        opts = merge_scsynth_opts(opts)
         @num_inputs = opts["-i"].to_i
         @num_outputs = opts["-o"].to_i
         args = opts.to_a.flatten
@@ -833,31 +804,6 @@ module SonicPi
           opts[command_line_key] = val
         end
         opts
-      end
-
-      def merge_opts(opts)
-        # extract scsynth opts override
-        begin
-          clobber_opts_a = Shellwords.split(opts.fetch(:scsynth_opts_override, ""))
-          scsynth_opts_override = clobber_opts_a.each_slice(2).to_h
-        rescue
-          scsynth_opts_override = {}
-        end
-
-        # extract scsynth opts
-        begin
-          scsynth_opts_a = Shellwords.split(opts.fetch(:scsynth_opts, ""))
-          scsynth_opts = clobber_opts_a.each_slice(2).to_h
-        rescue
-          scsynth_opts = {}
-        end
-
-
-        if scsynth_opts_override.empty?
-          return {"-u" => @port}.merge(DEFAULT_OPTS).merge(OS_SPECIFIC_OPTS).merge(opts).merge(scsynth_opts)
-        else
-          return scsynth_opts_override
-        end
       end
     end
 
